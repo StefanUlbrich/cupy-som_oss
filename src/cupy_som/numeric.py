@@ -24,5 +24,5 @@ if HAS_CUPY:
 else:
     logging.warning("Not using Cupy")
 
-#: The array type used in this package
+#: Alias for the array type used in this package
 Array: TypeAlias = NDArray[xp.double]

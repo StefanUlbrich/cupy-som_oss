@@ -36,3 +36,9 @@ cd docs
 sphinx-apidoc ../src/cupy_som -o api # if the code changed
 make html
 ```
+
+## Monitor GPU usage
+
+```sh
+watch -n 1 nvidia-smi
+```

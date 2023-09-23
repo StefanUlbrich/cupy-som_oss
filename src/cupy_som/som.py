@@ -2,10 +2,13 @@
 
 from dataclasses import dataclass
 from enum import Enum
+import logging
 
 import numpy as np
 
 from cupy_som.numeric import Array, xp
+
+logger = logging.getLogger(__name__)
 
 
 class Topology(Enum):
@@ -25,6 +28,7 @@ class SelfOrganizingMap:
     """
 
     n_neurons: int | tuple[int]
+    latent_dim: int
     n_features: int
     topology: Topology = Topology.EUCLIDEAN
     chunk_size: int = 1000
@@ -35,7 +39,8 @@ class SelfOrganizingMap:
     def __post_init__(self):
         match self.topology:
             case Topology.EUCLIDEAN:
-                assert isinstance(self.n_neurons, tuple)
+                if not isinstance(self.n_neurons, tuple):
+                    self.n_neurons = (self.n_neurons,) * self.latent_dim
                 self.latent = xp.array(list(xp.ndindex(*self.n_neurons))).astype(xp.double) / (
                     xp.array(self.n_neurons) - 1
                 )
@@ -77,13 +82,13 @@ class SelfOrganizingMap:
 
         match self.topology:
             case Topology.EUCLIDEAN:
-                dist = self.latent - winning[xp.newaxis, :]
+                dist = xp.sum((self.latent - winning[xp.newaxis, :]) ** 2, axis=1)
             case Topology.COSINE:
-                dist = np.arccos(self.latent @ winning.T)
+                dist = xp.arccos(xp.clip(self.latent @ winning.T, -1.0, 1.0)) ** 2
             case _:
                 raise NotImplementedError("This topology is not implemented")
 
-        neighborhood = xp.exp(-0.5 * xp.sum(dist**2, axis=1) / influence**2)  # (6)
+        neighborhood = xp.exp(-0.5 * dist / influence**2)  # (6)
 
         # Update the codebook
         self.codebook -= rate * diffs * xp.tile(neighborhood[:, xp.newaxis], (1, output_dim))  # (7)
@@ -109,6 +114,7 @@ class SelfOrganizingMap:
         n_samples = samples.shape[0]
 
         winning = xp.zeros((n_samples, k, self.latent.shape[1]))
+        sorted = xp.zeros((n_samples, k))
 
         for start in range(0, n_samples, self.chunk_size):
             end = min(start + self.chunk_size, n_samples)
@@ -118,9 +124,11 @@ class SelfOrganizingMap:
 
             # winning[start:end, :] = self.latent[xp.argmin(dists, axis=1)]
 
-            winning[start:end, :] = self.latent[np.argsort(dists, axis=1)[:, :k]]
+            _sorted = np.argsort(dists, axis=1)[:, :k]
+            winning[start:end, :] = self.latent[_sorted]
+            sorted[start:end, :] = _sorted
 
-        return winning
+        return winning, sorted
 
     def get_nearest_neurons(self, winning: Array, k: int) -> Array:
         """Get the :math:`k` nearest neighbors of :math:`l` winning neurons in *latent* space.
@@ -141,7 +149,7 @@ class SelfOrganizingMap:
                 raise NotImplementedError("This topology is not implemented")
 
         # needs to be reversed
-        return self.latent[neighbors[:, :, :-k:-1]]
+        return self.latent[neighbors[:, :, :-k:-1]], neighbors[:, :, :-k:-1]
 
     def batch(self, samples: Array):
         ...
@@ -149,10 +157,8 @@ class SelfOrganizingMap:
     def online(
         self,
         samples: Array,
-        rate_start: float = 0.7,
-        rate_end: float = 0.1,
-        influence_start: float | None = None,
-        influence_end: float | None = None,
+        rate: tuple[float, float] = (0.7, 0.1),
+        influence: tuple[float, float] | None = None,
         epochs: int = 5,
     ) -> None:
         """Train a SOM.
@@ -167,21 +173,21 @@ class SelfOrganizingMap:
         assert self.latent is not None
         assert self.codebook is not None
 
-        if influence_start is None:
-            influence_start = 1.0 / self.latent.shape[0] * 30
-        if influence_end is None:
-            influence_end = 1.0 / self.latent.shape[0] * 0.5
+        if influence is None:
+            influence = (1.0 / self.latent.shape[0] * 30, 1.0 / self.latent.shape[0] * 0.5)
 
         n_samples, output_dim = samples.shape
         assert output_dim == self.codebook.shape[1]
 
         for e in range(epochs):
-            for i, x in enumerate(samples):
-                rate = rate_start * (rate_end / rate_start) ** (float(e * n_samples + i) / n_samples)  # (8)
-                influence = influence_start * (influence_end / influence_start) ** (
-                    float(e * n_samples + i) / n_samples
-                )  # (9)
-                self.adapt(x, rate, influence)
+            logger.debug("Epoch %d", e)
 
-                if i % 100000 == 0:
-                    print(i)
+            for i, x in enumerate(samples):
+                rate_ = rate[0] * (rate[1] / rate[0]) ** (float(e * n_samples + i) / (epochs * n_samples))  # (8)
+                influence_ = influence[0] * (influence[1] / influence[0]) ** (
+                    float(e * n_samples + i) / (epochs * n_samples)
+                )  # (9)
+                self.adapt(x, rate_, influence_)
+
+                if i % 10000 == 0:
+                    logger.debug("Sample %d, rate: %.2f, influence: %.2f", i, rate_, influence_)
