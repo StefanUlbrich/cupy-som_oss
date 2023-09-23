@@ -128,6 +128,7 @@ class SelfOrganizingMap:
             winning[start:end, :] = self.latent[_sorted]
             sorted[start:end, :] = _sorted
 
+        # FIXME: maybe return self.latent[sorted] too
         return winning, sorted
 
     def get_nearest_neurons(self, winning: Array, k: int) -> Array:
@@ -147,6 +148,8 @@ class SelfOrganizingMap:
                 neighbors = np.argsort(winning @ self.latent.T, axis=2)
             case _:
                 raise NotImplementedError("This topology is not implemented")
+
+        # FIXME: k should not include the neuron itself and has an off-by-one error
 
         # needs to be reversed
         return self.latent[neighbors[:, :, :-k:-1]], neighbors[:, :, :-k:-1]
