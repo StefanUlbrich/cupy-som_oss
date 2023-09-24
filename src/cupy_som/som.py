@@ -23,11 +23,29 @@ class SelfOrganizingMap:
     """Data class for a self-organizing map
 
     args:
-        latent (xp.ndarray): Topology of the network
-        codebook (xp.ndarray): Feature vectors of the neurons
+        n_neuron (int | tuple[int, ...]):
+            Number of neurons. In case of Euclidean topologies, integer
+            values become converted into a tuple of length ``latent_dim``.
+            Alternatively, one can specify the number of neurons for each
+            dimension indepedently as a tuple of length `latent_dim`. For
+            sperical topologies only a integer value is allowed.
+        latent_dim (int): Dimensionality of the latent space
+        n_features (int): Dimensionality of the feature space
+        topology (:class:`Topology`): Topology of the the latent space
+        chunk_size (int):
+            Split up computation on the GPU to respect memory. Note: this should
+            rather be converted to memory size in the future (or read the available
+            space automatically)
+        latent (Array | None):
+            The neurons' coordinates in the latent space. Automatically initialized
+            according to the `topology` parameter if omitted. If given, `n_neuron`,
+            `topology` and `latent_dim` are ignored.
+        codebook (Array | None):
+            The neurons' weights/connections in the feature space. Automatically initialized
+            with random values if omitted. If not, the `n_features` parameter is ignored.
     """
 
-    n_neurons: int | tuple[int]
+    n_neurons: int | tuple[int, ...]
     latent_dim: int
     n_features: int
     topology: Topology = Topology.EUCLIDEAN
@@ -41,9 +59,10 @@ class SelfOrganizingMap:
             case Topology.EUCLIDEAN:
                 if not isinstance(self.n_neurons, tuple):
                     self.n_neurons = (self.n_neurons,) * self.latent_dim
-                self.latent = xp.array(list(xp.ndindex(*self.n_neurons))).astype(xp.double) / (
-                    xp.array(self.n_neurons) - 1
-                )
+                if self.latent is None:
+                    self.latent = xp.array(list(xp.ndindex(*self.n_neurons))).astype(xp.double) / (
+                        xp.array(self.n_neurons) - 1
+                    )
             case Topology.COSINE:
                 if self.latent is None:
                     raise NotImplementedError(
@@ -54,7 +73,8 @@ class SelfOrganizingMap:
                 raise NotImplementedError("This topology is not implemented")
 
         assert self.latent is not None
-        self.codebook = xp.random.rand(self.latent.shape[0], self.n_features)
+        if self.codebook is None:
+            self.codebook = xp.random.rand(self.latent.shape[0], self.n_features)
 
     def adapt(self, sample: Array, rate: float, influence: float) -> None:
         """A single update step
@@ -142,6 +162,7 @@ class SelfOrganizingMap:
             Array: Shape: ``(n_samples, l, k)``
         """
 
+        assert self.latent is not None
         match self.topology:
             case Topology.COSINE:
                 # (n_samples, l, latent_dim) @ (latent_dim, n_neurons) = (n_samples, l, n_neurons)
