@@ -203,18 +203,21 @@ class SelfOrganizingMap:
             # stop criterion: if indices don't change anymore. Indices are >= 0 -> initialized as -1 (or n_neurons+1)
             last_indices = xp.ones((samples.shape[0], 1)) * -1.0
 
-            while True:
+            max_iterations = 30
+            for i in range(max_iterations):
                 ## expectation step (finding bmu)
                 winning, indices = self.get_winning(samples, k=1)
 
+                logger.debug("Iteration: %i, indices: %s", i, indices.flatten())
                 # Check convergence
                 if xp.allclose(indices, last_indices):
+                    logger.info("Converged after %i iterations", i)
                     break  # converged
 
                 winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
 
                 # (n_samples, latent_dim) , (latent_dim, n_neurons) -> (n_samples, n_neurons)
-                dist = xp.arccos(winning @ self.latent.T)
+                dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
 
                 ## maximization step (updating the neurons)
                 # (n_samples, □, n_features), (□, n_neurons, n_features) -> ...
@@ -222,12 +225,17 @@ class SelfOrganizingMap:
 
                 # (n_samples, n_neurons)
                 neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
+                neighborhood /= xp.sum(neighborhood, axis=0)
+
+                logger.debug("NaN in neighborhood: %s", np.count_nonzero(~np.isnan(neighborhood)))
 
                 # (n_samples, n_features, □), (n_samples, n_neurons, n_features) -> (n_neurons, n_features)
                 update = xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
-                update /= xp.sum(neighborhood, axis=0)[:, np.newaxis]
 
                 self.codebook += update
+                last_indices = indices
+            else:
+                logger.warning("Not converged for influence: %f", influence)
 
     def online(
         self,
