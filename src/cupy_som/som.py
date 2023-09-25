@@ -73,8 +73,14 @@ class SelfOrganizingMap:
                 raise NotImplementedError("This topology is not implemented")
 
         assert self.latent is not None
+        self.latent_dim = self.latent.shape[1]
+
         if self.codebook is None:
             self.codebook = xp.random.rand(self.latent.shape[0], self.n_features)
+        else:
+            if self.codebook.shape[0] != self.latent.shape[0]:
+                raise ValueError("Dimensions of the input does not match")
+            self.n_features = self.codebook.shape[1]
 
     def adapt(self, sample: Array, rate: float, influence: float) -> None:
         """A single update step
@@ -175,8 +181,53 @@ class SelfOrganizingMap:
         # needs to be reversed
         return self.latent[neighbors[:, :, :-k:-1]], neighbors[:, :, :-k:-1]
 
-    def batch(self, samples: Array):
-        ...
+    def batch(self, samples: Array, influences: tuple[float, ...]) -> None:
+        """Batch learning similar to expectation maximization
+
+        Args:
+            samples (Array): The samples to learn from
+            influences (tuple[float, ...]):
+                To avoid "folds" in the map, multiple trainings
+                with decreasing ranges of influence should be done
+                (cf. "from exploration to exploitation"). See Section
+                7.2, p. 79 in `MATLAB Implementations and Applications
+                of the Self-Organizing
+                Map <http://docs.unigrafia.fi/publications/kohonen_teuvo/>`_
+
+        """
+        assert self.latent is not None
+        assert self.codebook is not None
+
+        ## exploration -> exploitation
+        for influence in influences:
+            # stop criterion: if indices don't change anymore. Indices are >= 0 -> initialized as -1 (or n_neurons+1)
+            last_indices = xp.ones((samples.shape[0], 1)) * -1.0
+
+            while True:
+                ## expectation step (finding bmu)
+                winning, indices = self.get_winning(samples, k=1)
+
+                # Check convergence
+                if xp.allclose(indices, last_indices):
+                    break  # converged
+
+                winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
+
+                # (n_samples, latent_dim) , (latent_dim, n_neurons) -> (n_samples, n_neurons)
+                dist = xp.arccos(winning @ self.latent.T)
+
+                ## maximization step (updating the neurons)
+                # (n_samples, □, n_features), (□, n_neurons, n_features) -> ...
+                diffs = samples[:, xp.newaxis, :] - self.codebook[np.newaxis, :, :]
+
+                # (n_samples, n_neurons)
+                neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
+
+                # (n_samples, n_features, □), (n_samples, n_neurons, n_features) -> (n_neurons, n_features)
+                update = xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
+                update /= xp.sum(neighborhood, axis=0)[:, np.newaxis]
+
+                self.codebook += update
 
     def online(
         self,
