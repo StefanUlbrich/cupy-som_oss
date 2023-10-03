@@ -91,6 +91,9 @@ class SelfOrganizingMap:
             influence (float): Influence
         """
 
+        # formula numbers correspond to
+        # https://www.lemonfold.io/posts/2023/citrate/cerebral/cerebral_part1_motivation/#first-version-of-the-algorithm
+
         assert self.latent is not None
         assert self.codebook is not None
 
@@ -200,8 +203,8 @@ class SelfOrganizingMap:
 
         ## exploration -> exploitation
         for influence in influences:
-            # stop criterion: if indices don't change anymore. Indices are >= 0 -> initialized as -1 (or n_neurons+1)
-            last_indices = xp.ones((samples.shape[0], 1)) * -1.0
+            # stop criterion: if indices don't change anymore
+            last_indices = xp.ones((samples.shape[0], 1)) * self.n_neurons
 
             max_iterations = 30
             for i in range(max_iterations):

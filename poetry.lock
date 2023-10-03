@@ -3318,4 +3318,4 @@ cuda11x = ["cupy-cuda11x"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "51b70c0848a13208f651f1792539d67b722ee5253e42feec77f1817d0134d14a"
+content-hash = "7da6c4e58f690781b30253e79ba9d01f926c60213214d30e7b7eaafb5dd89ed8"
