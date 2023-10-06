@@ -139,6 +139,9 @@ class SelfOrganizingMap:
                 and stop index of chunk.
         """
 
+        assert self.latent is not None
+        assert self.codebook is not None
+
         n_samples = samples.shape[0]
 
         for start in range(0, n_samples, self.chunk_size):
@@ -147,10 +150,10 @@ class SelfOrganizingMap:
             diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, np.newaxis, :]  # (4)
             dists = xp.linalg.norm(diffs, axis=2)
 
-            _sorted = np.argsort(dists, axis=1)[:, :k]
-            winning = self.latent[_sorted]
+            indices = np.argsort(dists, axis=1)[:, :k]
+            latent = self.latent[indices]
 
-            yield _sorted, winning, diffs, (start, end)
+            yield indices, latent, diffs, (start, end)
 
 
     def get_winning(self, samples: Array, k: int = 1) -> Array:
@@ -169,27 +172,17 @@ class SelfOrganizingMap:
         samples = xp.atleast_2d(samples)
         assert self.latent is not None
         assert self.codebook is not None
-        n_neurons, output_dim = self.codebook.shape  # (3)
 
         n_samples = samples.shape[0]
 
-        winning = xp.zeros((n_samples, k, self.latent.shape[1]))
-        sorted = xp.zeros((n_samples, k))
+        latent = xp.zeros((n_samples, k, self.latent.shape[1]))
+        indices = xp.zeros((n_samples, k))
 
-        for start in range(0, n_samples, self.chunk_size):
-            end = min(start + self.chunk_size, n_samples)
+        for i, l, _, idx in get_winning_chunks(samples, k):
+            latent[idx[0]:idx[1], :] = l
+            indices[idx[0]:idx[1], :] = i
 
-            diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, np.newaxis, :]  # (4)
-            dists = xp.linalg.norm(diffs, axis=2)
-
-            # winning[start:end, :] = self.latent[xp.argmin(dists, axis=1)]
-
-            _sorted = np.argsort(dists, axis=1)[:, :k]
-            winning[start:end, :] = self.latent[_sorted]
-            sorted[start:end, :] = _sorted
-
-        # FIXME: maybe return self.latent[sorted] too
-        return winning, sorted
+        return latent, indices
 
     def get_nearest_neurons(self, winning: Array, k: int) -> Array:
         """Get the :math:`k` nearest neighbors of :math:`l` winning neurons in *latent* space.
@@ -240,31 +233,52 @@ class SelfOrganizingMap:
             max_iterations = 30
             for i in range(max_iterations):
                 ## expectation step (finding bmu)
-                winning, indices = self.get_winning(samples, k=1)
-
                 logger.debug("Iteration: %i, indices: %s", i, indices.flatten())
-                # Check convergence
+
+                # allocate/initializes indices, update 
+
+                update = xp.zeros_like(self.codebook)
+                indices = xp.zeros_like(last_indices)
+
+                for chunk_indices, winning, diffs, idx in get_winning_chunks(samples, k=1):
+                    indices[idx[0]:idx[1], :] = chunk_indices
+
+                    winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
+
+                    # (chunk_size, latent_dim) , (latent_dim, n_neurons) -> (chunk_size, n_neurons)
+                    dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
+
+                    # (n_samples, n_neurons)
+                    neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
+                    neighborhood /= xp.sum(neighborhood, axis=0)
+
+                    update += xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
+
                 if xp.allclose(indices, last_indices):
                     logger.info("Converged after %i iterations", i)
                     break  # converged
 
-                winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
+                # winning, indices = self.get_winning(samples, k=1)
 
-                # (n_samples, latent_dim) , (latent_dim, n_neurons) -> (n_samples, n_neurons)
-                dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
+                # # Check convergence
 
-                ## maximization step (updating the neurons)
-                # (n_samples, □, n_features), (□, n_neurons, n_features) -> ...
-                diffs = samples[:, xp.newaxis, :] - self.codebook[np.newaxis, :, :]
+                # winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
 
-                # (n_samples, n_neurons)
-                neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
-                neighborhood /= xp.sum(neighborhood, axis=0)
+                # # (n_samples, latent_dim) , (latent_dim, n_neurons) -> (n_samples, n_neurons)
+                # dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
 
-                logger.debug("NaN in neighborhood: %s", np.count_nonzero(~np.isnan(neighborhood)))
+                # ## maximization step (updating the neurons)
+                # # (n_samples, □, n_features), (□, n_neurons, n_features) -> ...
+                # diffs = samples[:, xp.newaxis, :] - self.codebook[np.newaxis, :, :]
 
-                # (n_samples, n_features, □), (n_samples, n_neurons, n_features) -> (n_neurons, n_features)
-                update = xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
+                # # (n_samples, n_neurons)
+                # neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
+                # neighborhood /= xp.sum(neighborhood, axis=0)
+
+                # logger.debug("NaN in neighborhood: %s", np.count_nonzero(~np.isnan(neighborhood)))
+
+                # # (n_samples, n_features, □), (n_samples, n_neurons, n_features) -> (n_neurons, n_features)
+                # update = xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
 
                 self.codebook += update
                 last_indices = indices
