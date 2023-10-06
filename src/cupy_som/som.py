@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from collections.abc import Generator
+
 import logging
 
 import numpy as np
@@ -121,6 +123,35 @@ class SelfOrganizingMap:
 
         # Update the codebook
         self.codebook -= rate * diffs * xp.tile(neighborhood[:, xp.newaxis], (1, output_dim))  # (7)
+
+    def get_winning_chunks(self, samples: Array, k: int) -> Generator[tuple[Array, Array, Array, tuple[int,int]], None,None]:
+        """Get winning neurons for a set of samples
+
+        Args:
+            samples (Array): Samples, ``(n_samples, input_dim)``
+            k(int): Retrieve the `k` best matching neurons
+
+        Yields:
+            (Array, Array, Array, (int,int)):
+                For each chunk of samples of size ``self.chunk_size``, 
+                the indices of the :math:`k` winning neurons, their latent coordinates,
+                the differences of the codebook to the samples, a tuple with the start
+                and stop index of chunk.
+        """
+
+        n_samples = samples.shape[0]
+
+        for start in range(0, n_samples, self.chunk_size):
+            end = min(start + self.chunk_size, n_samples)
+
+            diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, np.newaxis, :]  # (4)
+            dists = xp.linalg.norm(diffs, axis=2)
+
+            _sorted = np.argsort(dists, axis=1)[:, :k]
+            winning = self.latent[_sorted]
+
+            yield _sorted, winning, diffs, (start, end)
+
 
     def get_winning(self, samples: Array, k: int = 1) -> Array:
         """Get winning neurons for a set of samples
