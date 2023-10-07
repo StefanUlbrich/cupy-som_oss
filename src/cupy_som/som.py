@@ -240,15 +240,15 @@ class SelfOrganizingMap:
                 update = xp.zeros_like(self.codebook)
                 indices = xp.zeros_like(last_indices)
 
-                for chunk_indices, winning, diffs, idx in self.get_winning_chunks(samples, k=1):
+                for chunk_indices, latent, diffs, idx in self.get_winning_chunks(samples, k=1):
                     # logger.debug("start: %i, end: %i, winning: %s\n%s", idx[0], idx[1], winning.shape, winning)
 
                     indices[idx[0] : idx[1], :] = chunk_indices
 
-                    winning = winning[:, 0, :]  # remove unnecessary dim (special case k=1)
+                    latent = latent[:, 0, :]  # remove unnecessary dim (special case k=1)
 
                     # (chunk_size, latent_dim) , (latent_dim, n_neurons) -> (chunk_size, n_neurons)
-                    dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
+                    dist = xp.arccos(np.clip(latent @ self.latent.T, -1.0, 1.0))
 
                     # (n_samples, n_neurons)
                     neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
