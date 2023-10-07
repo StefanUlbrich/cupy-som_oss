@@ -59,7 +59,7 @@ class Device:
 
 def bytes_to_gb(bytes: int) -> float:
     """Helper function to convert bytes to gigabytes"""
-    return bytes / 1024 / 1024
+    return bytes / 1024**3
 
 
 #: Algebraic data type / Variadic to describe memory limits
@@ -83,6 +83,17 @@ def get_chunk_size(
 
     Returns:
         tuple[int, int]: The chunk size and the resulting number of iterations
+
+
+    Example:
+        To compute the chunksize given your system's single NVidia GPU for a large
+        data set of 64-bit floats (1M samples x 200 features x 500 neurons x 8):
+
+            >>> from cupy_som.numeric import get_chunk_size
+            >>> get_chunk_size((1e6, 500, 128), Device())
+            DEBUG:__main__:Free memory: 10.160 GB of 11.757 GB
+            DEBUG:__main__:Total size: 476.837 GB, Chunk size: 21306 (10.159 GB)
+            (21306, 47)
     """
     match chunk_size:
         case Memory(bytes):
@@ -90,25 +101,23 @@ def get_chunk_size(
             cells_per_slice = prod(v for i, v in enumerate(shape) if i != axis)
             bytes_per_slice = cells_per_slice * np.dtype(dtype).itemsize
             rows = bytes // bytes_per_slice
-            total_size = prod(shape) * itemsize
             logger.debug(
-                "Total size: %.2f (%.2f GB), Chunk size: %d (%.2f GB)",
-                total_size,
-                bytes_to_gb(total_size),
+                "Total size: %.3f GB, Chunk size: %d (%.3f GB)",
+                bytes_to_gb(prod(shape) * itemsize),
                 rows,
                 bytes_to_gb(rows * bytes_per_slice),
             )
             return rows, ceil(shape[axis] / rows)
         case Rows(value):
-            print("Rows")
             return value, ceil(shape[axis] / value)
         case Device(device):
-            print("Device")
             if not HAS_CUPY:
                 raise ValueError("Cupy not enabled")
 
-            used, total = xp.cuda.Device(device).mem_info
-            return get_chunk_size(shape, Memory(total - used))
+            free, total = xp.cuda.Device(device).mem_info
+            logger.debug("Free memory: %.3f GB of %.3f GB", bytes_to_gb(free), bytes_to_gb(total))
+
+            return get_chunk_size(shape, Memory(free))
         case None:
             return sys.maxsize, 1
         case _:
