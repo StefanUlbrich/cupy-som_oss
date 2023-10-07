@@ -14,9 +14,12 @@ classifiers = [
 python = "^3.10"
 numpy = "1.24.2"
 cupy-cuda11x =  { version = "^12.2.0", optional = true }
+# requires : sudo apt install  libgmp-dev .. maybe copy the source code for earth-movers-distance
+dit = {version = "^1.5", optional = true}
 
 [tool.poetry.extras]
 cuda11x = ["cupy-cuda11x"]
+dit = ["dit"]
 
 
 [tool.poetry.group.dev.dependencies]
