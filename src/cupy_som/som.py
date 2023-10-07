@@ -237,14 +237,15 @@ class SelfOrganizingMap:
                 logger.debug("Iteration: %i, indices: %s", i, last_indices.flatten())
 
                 # allocate/initializes indices, update
-
                 update = xp.zeros_like(self.codebook)
                 indices = xp.zeros_like(last_indices)
 
                 for chunk_indices, winning, diffs, idx in self.get_winning_chunks(samples, k=1):
+                    # logger.debug("start: %i, end: %i, winning: %s\n%s", idx[0], idx[1], winning.shape, winning)
+
                     indices[idx[0] : idx[1], :] = chunk_indices
 
-                    winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
+                    winning = winning[:, 0, :]  # remove unnecessary dim (special case k=1)
 
                     # (chunk_size, latent_dim) , (latent_dim, n_neurons) -> (chunk_size, n_neurons)
                     dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
@@ -253,34 +254,11 @@ class SelfOrganizingMap:
                     neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
                     neighborhood /= xp.sum(neighborhood, axis=0)
 
-                    update += xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
+                    update -= xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
 
                 if xp.allclose(indices, last_indices):
                     logger.info("Converged after %i iterations", i)
                     break  # converged
-
-                # winning, indices = self.get_winning(samples, k=1)
-
-                # # Check convergence
-
-                # winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
-
-                # # (n_samples, latent_dim) , (latent_dim, n_neurons) -> (n_samples, n_neurons)
-                # dist = xp.arccos(np.clip(winning @ self.latent.T, -1.0, 1.0))
-
-                # ## maximization step (updating the neurons)
-                # # (n_samples, □, n_features), (□, n_neurons, n_features) -> ...
-                # diffs = samples[:, xp.newaxis, :] - self.codebook[np.newaxis, :, :]
-
-                # # (n_samples, n_neurons)
-                # neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
-                # neighborhood /= xp.sum(neighborhood, axis=0)
-
-                # logger.debug("NaN in neighborhood: %s", np.count_nonzero(~np.isnan(neighborhood)))
-
-                # # (n_samples, n_features, □), (n_samples, n_neurons, n_features) -> (n_neurons, n_features)
-                # update = xp.sum(neighborhood[:, :, np.newaxis] * diffs, axis=0)
-
                 self.codebook += update
                 last_indices = indices
             else:
