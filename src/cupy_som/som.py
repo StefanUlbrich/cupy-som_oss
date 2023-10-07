@@ -124,7 +124,9 @@ class SelfOrganizingMap:
         # Update the codebook
         self.codebook -= rate * diffs * xp.tile(neighborhood[:, xp.newaxis], (1, output_dim))  # (7)
 
-    def get_winning_chunks(self, samples: Array, k: int) -> Generator[tuple[Array, Array, Array, tuple[int,int]], None,None]:
+    def get_winning_chunks(
+        self, samples: Array, k: int
+    ) -> Generator[tuple[Array, Array, Array, tuple[int, int]], None, None]:
         """Get winning neurons for a set of samples
 
         Args:
@@ -133,7 +135,7 @@ class SelfOrganizingMap:
 
         Yields:
             (Array, Array, Array, (int,int)):
-                For each chunk of samples of size ``self.chunk_size``, 
+                For each chunk of samples of size ``self.chunk_size``,
                 the indices of the :math:`k` winning neurons, their latent coordinates,
                 the differences of the codebook to the samples, a tuple with the start
                 and stop index of chunk.
@@ -154,7 +156,6 @@ class SelfOrganizingMap:
             latent = self.latent[indices]
 
             yield indices, latent, diffs, (start, end)
-
 
     def get_winning(self, samples: Array, k: int = 1) -> Array:
         """Get winning neurons for a set of samples
@@ -178,9 +179,9 @@ class SelfOrganizingMap:
         latent = xp.zeros((n_samples, k, self.latent.shape[1]))
         indices = xp.zeros((n_samples, k))
 
-        for i, l, _, idx in get_winning_chunks(samples, k):
-            latent[idx[0]:idx[1], :] = l
-            indices[idx[0]:idx[1], :] = i
+        for chunk_indices, chunk_latent, _, idx in self.get_winning_chunks(samples, k):
+            latent[idx[0] : idx[1], :] = chunk_latent
+            indices[idx[0] : idx[1], :] = chunk_indices
 
         return latent, indices
 
@@ -233,15 +234,15 @@ class SelfOrganizingMap:
             max_iterations = 30
             for i in range(max_iterations):
                 ## expectation step (finding bmu)
-                logger.debug("Iteration: %i, indices: %s", i, indices.flatten())
+                logger.debug("Iteration: %i, indices: %s", i, last_indices.flatten())
 
-                # allocate/initializes indices, update 
+                # allocate/initializes indices, update
 
                 update = xp.zeros_like(self.codebook)
                 indices = xp.zeros_like(last_indices)
 
-                for chunk_indices, winning, diffs, idx in get_winning_chunks(samples, k=1):
-                    indices[idx[0]:idx[1], :] = chunk_indices
+                for chunk_indices, winning, diffs, idx in self.get_winning_chunks(samples, k=1):
+                    indices[idx[0] : idx[1], :] = chunk_indices
 
                     winning = winning[:, 0, :]  # remove unnecessary dim (k=1)
 
