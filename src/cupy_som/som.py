@@ -154,9 +154,9 @@ class SelfOrganizingMap:
             dists = xp.linalg.norm(diffs, axis=2)
 
             if k == 1:
-                indices = xp.argsort(dists, axis=1)[:, :k]
-            else:
                 indices = xp.argmin(dists, axis=1)[:, xp.newaxis]
+            else:
+                indices = xp.argsort(dists, axis=1)[:, :k]
 
             latent = self.latent[indices]
 
