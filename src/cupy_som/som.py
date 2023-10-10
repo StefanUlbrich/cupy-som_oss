@@ -52,6 +52,7 @@ class SelfOrganizingMap:
     n_features: int
     topology: Topology = Topology.EUCLIDEAN
     chunk_size: int = 1000
+    max_iterations: int = 30
 
     latent: Array | None = None
     codebook: Array | None = None
@@ -106,7 +107,7 @@ class SelfOrganizingMap:
 
         # Neural coordinates of the winning neuron (BMU)
         winning = self.latent[xp.argmin(xp.linalg.norm(diffs, axis=1))]  # (5)
-        # winning = self.get_winning(sample)
+        # winning, _ = self.get_winning(sample)
 
         # TODO compute the new influence based on scalar product
         # Influence of the BMU ∀ neurons
@@ -149,10 +150,14 @@ class SelfOrganizingMap:
         for start in range(0, n_samples, self.chunk_size):
             end = min(start + self.chunk_size, n_samples)
 
-            diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, np.newaxis, :]  # (4)
+            diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, xp.newaxis, :]  # (4)
             dists = xp.linalg.norm(diffs, axis=2)
 
-            indices = np.argsort(dists, axis=1)[:, :k]
+            if k == 1:
+                indices = xp.argsort(dists, axis=1)[:, :k]
+            else:
+                indices = xp.argmin(dists, axis=1)[:, xp.newaxis]
+
             latent = self.latent[indices]
 
             yield indices, latent, diffs, (start, end)
@@ -245,12 +250,14 @@ class SelfOrganizingMap:
                 for chunk_indices, latent, diffs, idx in self.get_winning_chunks(samples, k=1):
                     # logger.debug("start: %i, end: %i, winning: %s\n%s", idx[0], idx[1], winning.shape, winning)
 
+                    # logger.debug("%s", diffs.shape)
+
                     indices[idx[0] : idx[1], :] = chunk_indices
 
                     latent = latent[:, 0, :]  # remove unnecessary dim (special case k=1)
 
                     # (chunk_size, latent_dim) , (latent_dim, n_neurons) -> (chunk_size, n_neurons)
-                    dist = xp.arccos(np.clip(latent @ self.latent.T, -1.0, 1.0))
+                    dist = xp.arccos(xp.clip(latent @ self.latent.T, -1.0, 1.0))
 
                     # (n_samples, n_neurons)
                     neighborhood = xp.exp(-0.5 * dist**2 / influence**2)
