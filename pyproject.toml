@@ -64,6 +64,14 @@ mypy_path = "src"
 show_error_codes = true
 strict = true
 
+[[tool.mypy.overrides]]
+module = 'cupy.*'
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = 'dit.*'
+ignore_missing_imports = true
+
 [tool.black]
 line-length = 120
 target_version = ["py310"]

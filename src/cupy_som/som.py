@@ -57,7 +57,7 @@ class SelfOrganizingMap:
     latent: Array | None = None
     codebook: Array | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         match self.topology:
             case Topology.EUCLIDEAN:
                 if not isinstance(self.n_neurons, tuple):
