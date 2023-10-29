@@ -1,10 +1,9 @@
 # pyright: reportMissingImports=false
 
-from dataclasses import dataclass
-from enum import Enum
-from collections.abc import Generator
-
 import logging
+from collections.abc import Generator
+from dataclasses import dataclass, field
+from enum import Enum
 
 import numpy as np
 
@@ -51,11 +50,12 @@ class SelfOrganizingMap:
     latent_dim: int
     n_features: int
     topology: Topology = Topology.EUCLIDEAN
+    # TODO: feature_topology = Topology.EUCLIDEAN
     chunk_size: int = 1000
-    max_iterations: int = 30
 
     latent: Array | None = None
     codebook: Array | None = None
+    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng())
 
     def __post_init__(self) -> None:
         match self.topology:
@@ -87,6 +87,8 @@ class SelfOrganizingMap:
 
     def adapt(self, sample: Array, rate: float, influence: float) -> None:
         """A single update step
+
+        DEPRECATED
 
         Args:
             samples (xp.ndarray): The training samples
@@ -125,14 +127,17 @@ class SelfOrganizingMap:
         # Update the codebook
         self.codebook -= rate * diffs * xp.tile(neighborhood[:, xp.newaxis], (1, output_dim))  # (7)
 
-    def get_winning_chunks(
-        self, samples: Array, k: int
+    def iter_winning(
+        self, samples: Array, k: int, random: bool = False
     ) -> Generator[tuple[Array, Array, Array, tuple[int, int]], None, None]:
         """Get winning neurons for a set of samples
 
         Args:
             samples (Array): Samples, ``(n_samples, input_dim)``
             k(int): Retrieve the `k` best matching neurons
+            random (bool):
+                Whether to choose the winners randomly rather
+                than based on distance.
 
         Yields:
             (Array, Array, Array, (int,int)):
@@ -150,13 +155,21 @@ class SelfOrganizingMap:
         for start in range(0, n_samples, self.chunk_size):
             end = min(start + self.chunk_size, n_samples)
 
+            # match (self.feature_topology):
+            #   case TOPOLOGY.EUCLEDIAN: ...
             diffs = self.codebook[xp.newaxis, :, :] - samples[start:end, xp.newaxis, :]  # (4)
             dists = xp.linalg.norm(diffs, axis=2)
+            #   case TOPOLOGY.ANGULAR: ...
 
-            if k == 1:
-                indices = xp.argmin(dists, axis=1)[:, xp.newaxis]
+            if not random:
+                if k == 1:
+                    indices = xp.argmin(dists, axis=1)[:, xp.newaxis]
+                else:
+                    indices = xp.argsort(dists, axis=1)[:, :k]
             else:
-                indices = xp.argsort(dists, axis=1)[:, :k]
+                indices = xp.array(self.rng.integers(0, self.n_neurons, (end - start, k)))
+                if start == 0:
+                    logger.debug("Random initialization")
 
             latent = self.latent[indices]
 
@@ -184,7 +197,7 @@ class SelfOrganizingMap:
         latent = xp.zeros((n_samples, k, self.latent.shape[1]))
         indices = xp.zeros((n_samples, k))
 
-        for chunk_indices, chunk_latent, _, idx in self.get_winning_chunks(samples, k):
+        for chunk_indices, chunk_latent, _, idx in self.iter_winning(samples, k):
             latent[idx[0] : idx[1], :] = chunk_latent
             indices[idx[0] : idx[1], :] = chunk_indices
 
@@ -214,7 +227,14 @@ class SelfOrganizingMap:
         # needs to be reversed
         return self.latent[neighbors[:, :, :-k:-1]], neighbors[:, :, :-k:-1]
 
-    def batch(self, samples: Array, influences: tuple[float, ...]) -> None:
+    def batch(
+        self,
+        data: Array,
+        influences: tuple[float, ...],
+        max_iterations: int = 30,
+        sampling_ratio: float | None = None,
+        min_change: float = 0.0,
+    ) -> None:
         """Batch learning similar to expectation maximization
 
         Args:
@@ -226,28 +246,54 @@ class SelfOrganizingMap:
                 7.2, p. 79 in `MATLAB Implementations and Applications
                 of the Self-Organizing
                 Map <http://docs.unigrafia.fi/publications/kohonen_teuvo/>`_
+            sampling_ratio: float | None:
+                Stochastic gradient descent: When set to value in :math:`(0,1)`,
+                a subset of the data set is used in each EM step.
+                The data sub set needs to be representative and should not be too small:
+                The algorithm determines convergence if all samples are assigned to the
+                same BMU as in the previoius run—with a small sample set this is more
+                probable to prematurely happen.
 
         """
         assert self.latent is not None
         assert self.codebook is not None
 
+        n_samples, _ = data.shape
+
+        self.codebook[:] = 0
         ## exploration -> exploitation
-        for influence in influences:
-            # stop criterion: if indices don't change anymore
-            last_indices = xp.ones((samples.shape[0], 1)) * self.n_neurons
 
+        for i, influence in enumerate(influences):
             denominator = xp.zeros(self.n_neurons)
+            last_indices = xp.ones((data.shape[0], 1)) * self.n_neurons
 
-            max_iterations = 30
-            for i in range(max_iterations):
-                ## expectation step (finding bmu)
-                logger.debug("Iteration: %i, indices: %s", i, last_indices.flatten())
+            for j in range(max_iterations):
+                # On the first iteration each samle gets
+                # a BMU randomly assigned to it. That way,
+                # we get a better random initializaiton of the weights
+                init_random = i == 0 and j == 0
+
+                # sampling: Random sub set of the data
+                # Note: on the very first iteration (i==0,j==0),
+                # we need to process all samples
+                if sampling_ratio is not None and not init_random:
+                    end = int(n_samples * sampling_ratio)
+                    permutation = xp.asarray(self.rng.permutation(n_samples)[:end])
+                    samples = data[permutation]
+                else:
+                    permutation = xp.arange(data.shape[0]).reshape(1, -1)
+                    samples = data
+
+                # stop criterion: if indices don't change anymore, so first let's get current winners
+                # for the sample in this loop
+                # _, last_indices = self.get_winning(samples, 1)
 
                 # allocate/initializes indices, update
                 update = xp.zeros_like(self.codebook)
-                indices = xp.zeros_like(last_indices)
+                indices = xp.zeros((samples.shape[0], 1))
 
-                for chunk_indices, latent, diffs, idx in self.get_winning_chunks(samples, k=1):
+                ## Iterate over chunks that fit into the memory.
+                for chunk_indices, latent, diffs, idx in self.iter_winning(samples, 1, random=init_random):
                     # logger.debug("start: %i, end: %i, winning: %s\n%s", idx[0], idx[1], winning.shape, winning)
 
                     # logger.debug("%s", diffs.shape)
@@ -266,11 +312,25 @@ class SelfOrganizingMap:
 
                     update -= xp.sum(neighborhood[:, :, xp.newaxis] * diffs, axis=0)
 
-                if xp.allclose(indices, last_indices):
-                    logger.info("Converged after %i iterations", i)
+                if xp.allclose(indices, last_indices[permutation]):
+                    logger.info("Converged after %i iterations", j)
                     break  # converged
+
+                if xp.sum(xp.isclose(indices, last_indices[permutation])) / samples.shape[0] > 1.0 - min_change:
+                    logger.info("Converged after %i iterations", j)
+                    break  # converged
+
+                logger.debug(
+                    "Iteration: %i, indices: %s, indices: %s, stable: %d (%.2f%%)",
+                    j,
+                    last_indices[permutation].flatten(),
+                    last_indices.flatten(),
+                    xp.sum(xp.isclose(indices, last_indices[permutation])),
+                    xp.sum(xp.isclose(indices, last_indices[permutation])) / samples.shape[0] * 100,
+                )
+
+                last_indices[permutation] = indices
                 self.codebook += update / denominator[:, xp.newaxis]
-                last_indices = indices
             else:
                 logger.warning("Not converged for influence: %f", influence)
 

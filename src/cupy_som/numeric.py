@@ -11,14 +11,14 @@ import numpy as np
 
 try:
     import cupy as xp  # noqa
-    from cupy.typing import NDArray
+    from cupy.typing import NDArray, DTypeLike
 
     #: indicates whether cupy could be imported
     HAS_CUPY = True
 
 except ImportError:
     import numpy as xp
-    from numpy.typing import NDArray
+    from numpy.typing import NDArray, DTypeLike
 
     HAS_CUPY = False
 
@@ -70,7 +70,7 @@ def get_chunk_size(
     shape: tuple[int, ...],
     chunk_size: ChunkLimit = None,
     axis: int = 0,
-    dtype: Array | np.dtype | str = "float64",
+    dtype: Array | DTypeLike | str = "float64",
 ) -> tuple[int, int]:
     """Computes the optimal size of chunks (e.g., rows) that fit into memory
     given limits.
