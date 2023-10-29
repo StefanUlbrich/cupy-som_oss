@@ -1,0 +1,27 @@
+name: Run tests
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v3
+        with:
+          python-version: 3.11.4
+      - name: Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          poetry self add 'poethepoet[poetry_plugin]'
+      - name: Installation
+        run: poetry install
+      - name: Linting
+        run: poetry all
