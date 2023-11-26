@@ -1,0 +1,7 @@
+[language-server.poetry]
+command = "poetry"
+args = ["run", "pylsp", "-v"]
+
+[[language]]
+name = "python"
+language-servers = ["poetry"]
