@@ -1,6 +1,27 @@
 # `cupy_som`
 
-Self-organizing maps using [Cupy](https://cupy.dev/)
+Self-organizing maps on CPU/GPU using [Cupy](https://cupy.dev/). The content of this
+package is to be considered experimental and maybe educational. Please do not use in production
+at your own risk only.
+
+With it one can
+
+* define arbitrary neural topologies–extending the concept of
+    [Self-Organizing Maps](https://en.wikipedia.org/wiki/Self-organizing_map)
+    (see my [blog post on SOM](https://www.lemonfold.io/posts/2022/aiml_essentials/part1/aiml-essentials-part1/)).
+    This is achieved by allowing (or rather, requiring) users to explicitly specifying the neurons
+    coordinates in the neural/latent space. To compute distance in the neural space you can choose
+    between the traditional Euclidean norm or the cosine distance (e.g., together with the ico-sphere topology).
+* Train with sequential (life-long) or fast, parallelized batch learning (stochastic Expectation maximization) with
+    (see [Chapter 7](http://docs.unigrafia.fi/publications/kohonen_teuvo/))
+* Effortlessly choose between the CPU or GPU thanks to [Cupy](https://cupy.dev/)
+
+This package is based on [this recent blog post](https://www.lemonfold.io/posts/2023/citrate/cerebral/cerebral_part1_motivation/#first-version-of-the-algorithm) about an
+implementation of self-organization in Rust (and Python), and years of research into
+its [applications in Robotics](https://www.lemonfold.io/publications/)
+
+I used this package in some personal research projects and it does not contain
+any external contributions prior to version 0.2.
 
 ## Installation
 
@@ -66,3 +87,7 @@ make html
 ```sh
 watch -n 1 nvidia-smi
 ```
+
+## License
+
+The code is licensed under the GNU Affero General Public License.

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cupy_som"
-version = "0.1.1"
+version = "0.2"
 description = "Self-organizing maps using Cupy"
 authors = ["Stefan Ulbrich"]
 repository = "https://github.com/StefanUlbrich/cupy_som"
